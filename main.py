@@ -1,11 +1,19 @@
-import os
 import json
 import logging
+from pathlib import Path
+
 import speech_recognition as sr
-from config import TOKEN
 from pydub import AudioSegment
 from telegram import Update
-from telegram.ext import filters, MessageHandler, ApplicationBuilder, ContextTypes, CommandHandler
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    filters,
+    MessageHandler,
+)
+
+from config import TOKEN
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -21,30 +29,42 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def voice_transcribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=update.effective_chat.id, text='Слушаю и записываю...')
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id, text='Слушаю и записываю...'
+    )
     voice_file = await context.bot.get_file(update.message.voice)
-    await voice_file.download_to_drive('voice_message.ogg')
-    orig_file = AudioSegment.from_ogg('voice_message.ogg')
-    orig_file.export(out_f='voice_message.wav', format='wav')
+    voice_path = Path('voice_message.ogg')
+    await voice_file.download_to_drive(str(voice_path))
+
+    orig_file = AudioSegment.from_ogg(str(voice_path))
+    wav_path = Path("voice_message.wav")
+    orig_file.export(out_f=str(wav_path), format='wav')
+
     r = sr.Recognizer()
     with sr.AudioFile('voice_message.wav') as source:
         audio = r.record(source)
+
     try:
         result = r.recognize_vosk(audio)
         json_data = json.loads(result)
         text = json_data["text"]
-    except sr.UnknownValueError:
+    except Exception:
         text = "Ошибка расшифровки"
-    except sr.RequestError:
-        text = "Не могу подключиться к сервису расшифровки"
+
     for x in range(0, len(text), 4096):
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=text[x:x+4096])
-    os.system('rm voice_message.ogg voice_message.wav')
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id, text=text[x:x+4096]
+        )
+
+    voice_path.unlink(missing_ok=True)
+    wav_path.unlink(missing_ok=True)
 
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=update.effective_chat.id,
-                                   text='Пришли мне голосовое сообщение, и я переведу её в текст.')
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text='Пришли мне голосовое сообщение, и я переведу её в текст.'
+    )
 
 
 if __name__ == '__main__':
