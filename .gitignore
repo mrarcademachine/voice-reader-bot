@@ -7,3 +7,5 @@
 /model/graph/
 /model/ivector/
 /model/README
+/.idea/
+/.gitignore
