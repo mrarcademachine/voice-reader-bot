@@ -1,9 +1,6 @@
-import json
 import logging
 from pathlib import Path
 
-import speech_recognition as sr
-from pydub import AudioSegment
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -13,66 +10,58 @@ from telegram.ext import (
     MessageHandler,
 )
 
-from config import TOKEN
+import extractor
+from config import API_TOKEN
+
+MESSAGE_CHAR_LIMIT = 4096
 
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.WARN
-)
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text="Привет! Если тебе лень слушать чью-то голосовуху — перешли её мне, и я переведу её в текст."
-    )
+    answer_message = "Привет! Если тебе лень слушать чью-то голосовуху — перешли её мне, и я переведу её в текст."
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=answer_message)
 
 
-async def voice_transcribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id, text='Слушаю и записываю...'
-    )
-    voice_file = await context.bot.get_file(update.message.voice)
-    voice_path = Path('voice_message.ogg')
-    await voice_file.download_to_drive(str(voice_path))
+async def transcribe_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    answer_message = "Слушаю и записываю..."
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=answer_message)
 
-    orig_file = AudioSegment.from_ogg(str(voice_path))
-    wav_path = Path("voice_message.wav")
-    orig_file.export(out_f=str(wav_path), format='wav')
+    voice_message_audio = await download_audio(update, context)
+    text = extractor.get_text(voice_message_audio)
 
-    r = sr.Recognizer()
-    with sr.AudioFile('voice_message.wav') as source:
-        audio = r.record(source)
-
-    try:
-        result = r.recognize_vosk(audio)
-        json_data = json.loads(result)
-        text = json_data["text"]
-    except Exception:
-        text = "Ошибка расшифровки"
-
-    for x in range(0, len(text), 4096):
+    for char in range(0, len(text), MESSAGE_CHAR_LIMIT):  # Splits message if character count exceeds 4096
         await context.bot.send_message(
-            chat_id=update.effective_chat.id, text=text[x:x+4096]
+            chat_id=update.effective_chat.id,
+            text=text[char:char+MESSAGE_CHAR_LIMIT]
         )
 
-    voice_path.unlink(missing_ok=True)
-    wav_path.unlink(missing_ok=True)
+
+async def download_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Path:
+    voice_file = await context.bot.get_file(update.message.voice)
+    voice_file_path = Path('voice_message.ogg')
+    await voice_file.download_to_drive(voice_file_path)
+    return voice_file_path
 
 
-async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text='Пришли мне голосовое сообщение, и я переведу её в текст.'
-    )
+async def unknown_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    answer_message = "Пришли мне голосовое сообщение, и я переведу его в текст."
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=answer_message)
 
 
 if __name__ == '__main__':
-    application = ApplicationBuilder().token(TOKEN).build()
+    application = ApplicationBuilder().token(API_TOKEN).build()
 
     start_handler = CommandHandler('start', start)
-    voice_handler = MessageHandler(filters.VOICE, voice_transcribe)
-    unknown_handler = MessageHandler(~filters.VOICE, unknown)
+    voice_handler = MessageHandler(filters.VOICE, transcribe_voice)
+    unknown_handler = MessageHandler(~filters.VOICE, unknown_input)
 
-    application.add_handlers([start_handler, voice_handler, unknown_handler])
+    application.add_handlers(
+        [
+            start_handler,
+            voice_handler,
+            unknown_handler
+        ]
+    )
     application.run_polling()
